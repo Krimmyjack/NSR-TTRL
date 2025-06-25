@@ -37,12 +37,12 @@
 The core challenge of the problem is reward estimation during inference while not having access to ground-truth information. While this setting appears elusive, we find that common practices in Test-Time Scaling (TTS), such as majority voting, yield surprisingly effective rewards suitable for driving RL training.
 
 <p align="center">
-   <img src="figs/teaser.png" alt="Performance and settings of TTRL." style="width: 95%;">
+   <img src="figs/teaser.png" alt="Performance and settings of TTRL." style="width: 80%;">
 </p>
 
 
 <p align="center">
-   <img src="figs/overview.png" alt="Overview of TTRL." style="width: 95%;">
+   <img src="figs/overview.png" alt="Overview of TTRL." style="width: 80%;">
 </p>
 
 
@@ -67,12 +67,17 @@ cd verl
 
 pip install -r requirements.txt
 
-bash examples/ttrl/aime.sh
+bash examples/ttrl/Qwen-2.5-Math/aime.sh
 ```
+
+> [!NOTE]
+> - You can use the script [data/preprocess.py](https://github.com/PRIME-RL/TTRL/blob/main/verl/data/preprocess.py) to convert data from the `JSON` format to the `Parquet` format for training with verl.
+> - We provide scripts in the `verl/examples/ttrl` directory for running TTRL on multiple models across various benchmarks.
+> - For further details regarding the code, please refer to the [verl documentation](https://verl.readthedocs.io/en/latest/index.html).
 
 We additionally conducted three independent runs using the preview version of our code. Two of the runs achieved a pass@1 of 43.3, while one run reached 46.7. Please refer to the [Weights & Biases logs](https://wandb.ai/truman-yx-zuo-nlp/TTRL/workspace).
 
-*All experiments were conducted on 8 * NVIDIA A100 80GB GPUs.*
+*All experiments were conducted on 8 x NVIDIA A100 80GB GPUs.*
 
 <details>
 <summary>

@@ -22,14 +22,14 @@ else
 fi
 
 EPISODE=30
-DATA_TRAIN_BATCH_SIZE=8 # Rollout Prompt Num
+DATA_TRAIN_BATCH_SIZE=8
 N_VOTES_PER_PROMPT=64
 N_SAMPLES_PER_PROMPT=32
-MINI_BATCH_SIZE=1 # Actual mini batch size is MINI_BATCH_SIZE * N_SAMPLES_PER_PROMPT
+MINI_BATCH_SIZE=1
 MICRO_BATCH_SIZE=2
 
-DATA_LOCAL_DIR="/fs-computility/prime/shengli/dev/verl/data"
-BACKBONE_PATH="/fs-computility/prime/shared/llms/Qwen/${BACKBONE}"
+DATA_LOCAL_DIR="path/to/TTRL/verl/data"
+BACKBONE_PATH="path/to/${BACKBONE}"
 
 MODEL="${TASK}-${BACKBONE}"
 EXPERIMENT="TTRL-Len@${K}k"

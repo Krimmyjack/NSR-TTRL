@@ -8,12 +8,12 @@ export VLLM_USE_V1=1
 DATE=$(date +%m%d)
 TIME_TAG=$(date +%H%M%S)
 
-TASK="AIME-TTT"
-BACKBONE="Qwen2.5-Math-1.5B"
+TASK="MATH-TTT"
+BACKBONE="Qwen2.5-7B"
 ADVANTAGE="grpo"
 
 K=3
-MAX_PROMPT_LENGTH=512
+MAX_PROMPT_LENGTH=1024
 MAX_RESPONSE_LENGTH=$((1024 * $K))
 if [ "$K" -gt 8 ]; then
   N=4
@@ -21,15 +21,15 @@ else
   N=16
 fi
 
-EPISODE=80
-DATA_TRAIN_BATCH_SIZE=8 # Rollout Prompt Num
+EPISODE=10
+DATA_TRAIN_BATCH_SIZE=32
 N_VOTES_PER_PROMPT=64
 N_SAMPLES_PER_PROMPT=32
-MINI_BATCH_SIZE=1 # Actual mini batch size is MINI_BATCH_SIZE * N_SAMPLES_PER_PROMPT
+MINI_BATCH_SIZE=1
 MICRO_BATCH_SIZE=2
 
-DATA_LOCAL_DIR="/fs-computility/prime/shengli/dev/verl/data"
-BACKBONE_PATH="/fs-computility/prime/shared/llms/Qwen/${BACKBONE}"
+DATA_LOCAL_DIR="path/to/TTRL/verl/data"
+BACKBONE_PATH="path/to/${BACKBONE}"
 
 MODEL="${TASK}-${BACKBONE}"
 EXPERIMENT="TTRL-Len@${K}k"
@@ -51,6 +51,7 @@ python -m verl.trainer.main_ppo \
   data.train_batch_size=$DATA_TRAIN_BATCH_SIZE \
   data.filter_overlong_prompts=True \
   data.truncation='error' \
+  data.suffix_prompt='"\nPlease reason step by step, and put your final answer within \boxed{}."' \
   actor_rollout_ref.model.path=$BACKBONE_PATH \
   actor_rollout_ref.model.enable_gradient_checkpointing=True \
   actor_rollout_ref.model.use_remove_padding=True \
@@ -66,7 +67,7 @@ python -m verl.trainer.main_ppo \
   actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=$MICRO_BATCH_SIZE \
   actor_rollout_ref.ref.fsdp_config.param_offload=True \
   actor_rollout_ref.rollout.name=vllm \
-  actor_rollout_ref.rollout.temperature=1.0 \
+  actor_rollout_ref.rollout.temperature=0.6 \
   actor_rollout_ref.rollout.enforce_eager=False \
   actor_rollout_ref.rollout.free_cache_engine=False \
   actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=$MICRO_BATCH_SIZE \
