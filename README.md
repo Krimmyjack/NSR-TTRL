@@ -71,8 +71,8 @@ bash examples/ttrl/Qwen-2.5-Math/aime.sh
 ```
 
 > [!NOTE]
-> - You can use the script [data/preprocess.py](https://github.com/PRIME-RL/TTRL/blob/main/verl/data/preprocess.py) to convert data from the `JSON` format to the `Parquet` format for training with verl.
-> - We provide scripts in the `verl/examples/ttrl` directory for running TTRL on multiple models across various benchmarks.
+> - You can use the script [verl/data/preprocess.py](https://github.com/PRIME-RL/TTRL/blob/main/verl/data/preprocess.py) to convert data from the `JSON` format to the `Parquet` format for training with verl.
+> - We provide scripts in the [verl/examples/ttrl](https://github.com/PRIME-RL/TTRL/tree/main/verl/examples/ttrl) directory for running TTRL on multiple models across various benchmarks.
 > - For further details regarding the code, please refer to the [verl documentation](https://verl.readthedocs.io/en/latest/index.html).
 
 We additionally conducted three independent runs using the preview version of our code. Two of the runs achieved a pass@1 of 43.3, while one run reached 46.7. Please refer to the [Weights & Biases logs](https://wandb.ai/truman-yx-zuo-nlp/TTRL/workspace).
