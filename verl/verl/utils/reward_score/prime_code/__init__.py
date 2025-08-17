@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import json
-import re
 import traceback
 
 from .utils import check_correctness as apps_check_correctness
@@ -33,7 +32,7 @@ def compute_score(completion, test_cases, continuous=False):
         try:
             res, metadata = apps_check_correctness(in_outs=test_cases, generation=solution, timeout=5, debug=False)
             metadata = dict(enumerate(metadata))[0]
-            success = all(map(lambda x: x == True, res))
+            success = all(map(lambda x: x is True, res))
             if success:
                 return success, metadata
         except Exception:
@@ -51,7 +50,7 @@ def compute_score(completion, test_cases, continuous=False):
             metadata_list = []
             res_list = []
             for test_case_id, test_case in enumerate(test_cases_list):
-                res, metadata = apps_check_correctness(in_outs=test_case, generation=solution, timeout=5, debug=False)
+                res, metadata = apps_check_correctness(in_outs=test_case, generation=solution, timeout=10, debug=False)
                 try:
                     metadata = dict(enumerate(metadata))[0]  # metadata can be empty occasionally
                 except Exception:
@@ -66,7 +65,7 @@ def compute_score(completion, test_cases, continuous=False):
                 if test_case_id >= 9:
                     break
             res_count = len(res_list) if len(res_list) > 0 else 1
-            success = sum(map(lambda x: x == True, res_list)) / res_count
+            success = sum(map(lambda x: x is True, res_list)) / res_count
     except Exception:
         traceback.print_exc(10)
         success = False

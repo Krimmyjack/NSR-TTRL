@@ -45,6 +45,7 @@ def run_prime(config, compute_score=None):
         # this is for local ray cluster
         ray.init(
             runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN"}},
+            num_cpus=config.ray_init.num_cpus,
         )
 
     ray.get(main_task.remote(config, compute_score))
@@ -122,15 +123,9 @@ def main_task(config, compute_score=None):
         from verl.workers.reward_manager import PrimeRewardManager
 
         reward_manager_cls = PrimeRewardManager
-    elif reward_manager_name == "ttrl":
-        from verl.workers.reward_manager import TTRLRewardManager
-
-        reward_manager_cls = TTRLRewardManager
     else:
         raise NotImplementedError
-
-    reward_kwargs = dict(config.reward_model.get("reward_kwargs", {}))
-    reward_fn = reward_manager_cls(tokenizer=tokenizer, num_examine=0, compute_score=compute_score, **reward_kwargs,)
+    reward_fn = reward_manager_cls(tokenizer=tokenizer, num_examine=0, compute_score=compute_score)
 
     # Note that we always use function-based RM for validation
     val_reward_fn = reward_manager_cls(tokenizer=tokenizer, num_examine=1, compute_score=compute_score)
@@ -145,6 +140,7 @@ def main_task(config, compute_score=None):
         ray_worker_group_cls=ray_worker_group_cls,
         reward_fn=reward_fn,
         val_reward_fn=val_reward_fn,
+        device_name=config.trainer.device,
     )
     trainer.init_workers()
     trainer.fit()

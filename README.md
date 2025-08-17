@@ -24,6 +24,7 @@
 > Welcome to the Era of Experience.  --David Silver, Richard S. Sutton
 
 # 🎉News
+- **[2025-07-11]** We bump into [verl v0.4.1](https://github.com/volcengine/verl/releases/tag/v0.4.1), check out our latest implementation.
 
 - **[2025-05-23]** We update both the paper and the code, with the implementation based on the [verl](https://github.com/volcengine/verl).
 
@@ -59,14 +60,23 @@ Furthermore, although TTRL is only supervised by the `maj@n` metric, TTRL has de
 
 # ✨Getting Started
 
-You can reproduce the results on `AIME 2024` with the following commands:
+## Env Setup
 
 ```bash
 git clone https://github.com/PRIME-RL/TTRL.git
-cd verl
 
-pip install -r requirements.txt
+cd TTRL/verl
 
+conda create -n ttrl python==3.10
+conda activate ttrl
+bash scripts/install_ttrl_deps.sh
+pip install -e .
+```
+
+## Reproduce TTRL
+You can reproduce the results on `AIME 2024` with the following commands:
+
+```bash
 bash examples/ttrl/Qwen-2.5-Math/aime.sh
 ```
 

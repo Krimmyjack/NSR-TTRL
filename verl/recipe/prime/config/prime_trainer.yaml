@@ -9,11 +9,11 @@ defaults:
   - _self_
 
 data:
-  filter_accuracy: False
+  filter_accuracy: True
   accuracy_lower_bound: 0.2
   accuracy_upper_bound: 0.8
-  oversample_factor: 1.0 # Sample more responses than the batch size. prompts satisfying the filter will be prioritized.
-  filter_truncate: False
+  oversample_factor: 4.0 # Sample more responses than the batch size. prompts satisfying the filter will be prioritized.
+  filter_truncate: True
   truncation: right
 
 actor_rollout_ref:
@@ -32,6 +32,9 @@ reward_model:
   model:
     ref_path: ${reward_model.model.path}
     use_remove_padding:  True
+    use_fused_kernels: ${actor_rollout_ref.model.use_fused_kernels}
+    fused_kernel_options:
+      impl_backend: torch # triton, torch
     tokenizer_path: ${actor_rollout_ref.model.path}
     enable_gradient_checkpointing: ${actor_rollout_ref.model.enable_gradient_checkpointing}
     ref_type: freeze
@@ -54,8 +57,7 @@ reward_model:
     loss_type: ce # currently only supports ce loss
   prime_granularity: token
   prime_norm: batch_norm # batch_norm or none. if set to none, the normalizer is beta_train
-  mini_batch_size: (${actor_rollout_ref.actor.ppo_mini_batch_size}) * (${actor_rollout_ref.rollout.n})
-  ppo_max_token_len_per_gpu: 32768 # (${actor_rollout_ref.actor.ppo_max_token_len_per_gpu}) * 2
+  mini_batch_size: ${actor_rollout_ref.actor.ppo_mini_batch_size}
   reward_manager: prime
 
 algorithm:
@@ -71,4 +73,4 @@ trainer:
   project_name: prime
   experiment_name: examples
   val_before_train: False
-  balance_batch: True
+  balance_batch: False

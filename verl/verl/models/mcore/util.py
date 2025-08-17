@@ -23,7 +23,8 @@ def preprocess_packed_seqs(
 ) -> tuple[torch.Tensor, PackedSeqParams]:
     """
     Preprocess packed sequences
-    CP splits sequence into CP*2 chunks, and each GPU gets 2 chunks (GPU0 gets first and last chunks, GPU1 gets second and second last chunks, and so on), this is for load balancing with causal masking.
+    CP splits sequence into CP*2 chunks, and each GPU gets 2 chunks (GPU0 gets first and last chunks, GPU1
+    gets second and second last chunks, and so on), this is for load balancing with causal masking.
     See https://github.com/NVIDIA/TransformerEngine/issues/1368
     """
     batch_size = input_ids.shape[0]
@@ -32,10 +33,7 @@ def preprocess_packed_seqs(
     tp_size = mpu.get_tensor_model_parallel_world_size()
     cp_size = mpu.get_context_parallel_world_size()
     cp_rank = mpu.get_context_parallel_rank()
-    if cp_size > 1:
-        align_size = tp_size * cp_size * 2
-    else:
-        align_size = tp_size
+    align_size = tp_size * cp_size * 2 if cp_size > 1 else tp_size
 
     pad_size = (align_size - seqlens_in_batch % align_size) % align_size
     seqlens_in_batch_padded = seqlens_in_batch + pad_size
@@ -162,8 +160,6 @@ def remove_left_padding(
     seq_lens = attention_mask.sum(dim=1)
     seq_len = seq_lens.max().item()
     if sequence_parallel:
-        from megatron.core import parallel_state as mpu
-
         sp_world_size = mpu.get_tensor_model_parallel_world_size()
         pad_size = (sp_world_size - seq_len % sp_world_size) % sp_world_size
         seq_len = seq_len + pad_size
