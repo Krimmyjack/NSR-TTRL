@@ -48,7 +48,10 @@ def main(config):
 def run_generation(config) -> None:
     if not ray.is_initialized():
         # this is for local ray cluster
-        ray.init(runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN"}})
+        ray.init(
+            runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN"}},
+            num_cpus=config.ray_init.num_cpus,
+        )
 
     ray.get(main_task.remote(config))
 
@@ -78,15 +81,17 @@ def main_task(config):
 
     ray_cls_with_init = RayClassWithInitArgs(cls=ray.remote(ActorRolloutRefWorker), config=config, role="rollout")
     resource_pool = RayResourcePool(process_on_nodes=[config.trainer.n_gpus_per_node] * config.trainer.nnodes)
-    wg = RayWorkerGroup(resource_pool=resource_pool, ray_cls_with_init=ray_cls_with_init)
+    wg = RayWorkerGroup(
+        resource_pool=resource_pool,
+        ray_cls_with_init=ray_cls_with_init,
+        device_name=config.trainer.device,
+    )
     wg.init_model()
 
     total_samples = len(dataset)
     config_batch_size = config.data.batch_size
     num_batch = -(-total_samples // config_batch_size)
     output_lst = [[] for _ in range(config.data.n_samples)]
-
-    check_input = 1
 
     for batch_idx in range(num_batch):
         print(f"[{batch_idx + 1}/{num_batch}] Start to process.")
@@ -101,11 +106,6 @@ def main_task(config):
             return_dict=True,
             tokenize=True,
         )
-        
-        # Print the input words
-        if check_input:
-            print("Input words:", tokenizer.decode(inputs["input_ids"][0], skip_special_tokens=True))
-
         input_ids = inputs["input_ids"]
         attention_mask = inputs["attention_mask"]
         position_ids = compute_position_id_with_mask(attention_mask)

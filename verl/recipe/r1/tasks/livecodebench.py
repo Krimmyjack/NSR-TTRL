@@ -58,13 +58,14 @@ def compute_score(completion, test_cases):
     # extract test cases
     try:
         in_outs = json.loads(test_cases)
-    except:
+    except Exception as e:
+        print(f"Error loading test cases: {e}")
         in_outs = json.loads(pickle.loads(zlib.decompress(base64.b64decode(test_cases.encode("utf-8")))))
 
     success = False
     try:
         res, metadata = check_correctness(in_outs=in_outs, generation=solution, timeout=6, debug=False)
-        success = all(map(lambda x: x == True, res))
+        success = all(map(lambda x: x is True, res))
     except Exception:
         pass
 

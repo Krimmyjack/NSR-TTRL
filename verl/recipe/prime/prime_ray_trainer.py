@@ -30,12 +30,14 @@ from verl import DataProto
 from verl.single_controller.ray import RayWorkerGroup
 from verl.trainer.ppo.core_algos import agg_loss
 from verl.trainer.ppo.metric_utils import _compute_response_info
-from verl.trainer.ppo.ray_trainer import RayPPOTrainer, ResourcePoolManager, Role, WorkerType, _timer, reduce_metrics
+from verl.trainer.ppo.ray_trainer import RayPPOTrainer, ResourcePoolManager, Role, WorkerType
 from verl.utils.checkpoint.checkpoint_manager import find_latest_ckpt_path
 from verl.utils.dataset.rl_dataset import RLHFDataset, collate_fn
-from torchdata.stateful_dataloader import StatefulDataLoader
+from verl.utils.debug.performance import simple_timer
+from verl.utils.metric import reduce_metrics
+
 from . import prime_core_algos
-from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
+
 
 def compute_advantage(data: DataProto, adv_estimator, config):
     if adv_estimator == "rloo":
@@ -157,8 +159,9 @@ class RayPRIMETrainer(RayPPOTrainer):
         ray_worker_group_cls: RayWorkerGroup = RayWorkerGroup,
         reward_fn=None,
         val_reward_fn=None,
+        device_name="cuda",
     ):
-        # assert torch.cuda.is_available(), 'cuda must be available on driver'
+        # assert get_torch_device().is_available(), 'cuda must be available on driver'
 
         super().__init__(
             config,
@@ -168,6 +171,7 @@ class RayPRIMETrainer(RayPPOTrainer):
             ray_worker_group_cls,
             reward_fn=reward_fn,
             val_reward_fn=val_reward_fn,
+            device_name=device_name,
         )
 
         self.use_critic = False
@@ -175,10 +179,9 @@ class RayPRIMETrainer(RayPPOTrainer):
     def _validate_config(self):
         super()._validate_config()
         # TODO: Additional config checks can be added here
-        config = self.config
 
-    def _create_dataloader(self):
-        
+    def _create_dataloader(self, *args, **kwargs):
+        from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 
         # TODO: we have to make sure the batch size is divisible by the dp size
         self.train_dataset = RLHFDataset(
@@ -248,7 +251,6 @@ class RayPRIMETrainer(RayPPOTrainer):
             actor_local_path,
             actor_remote_path,
             self.global_steps,
-            remove_previous_ckpt=self.config.trainer.remove_previous_ckpt_in_save,
         )
 
         if self.use_rm:
@@ -262,7 +264,6 @@ class RayPRIMETrainer(RayPPOTrainer):
                 reward_local_path,
                 reward_remote_path,
                 self.global_steps,
-                remove_previous_ckpt=self.config.trainer.remove_previous_ckpt_in_save,
             )
 
         # save dataloader
@@ -330,23 +331,12 @@ class RayPRIMETrainer(RayPPOTrainer):
         self.train_dataloader = torch.load(dataloader_local_path)
         if isinstance(self.train_dataloader.dataset, RLHFDataset):
             self.train_dataloader.dataset.resume_dataset_state()
-    
-    def _select_top_k_per_prompt(self, data, n_votes_per_prompt, n_samples_per_prompt):
-        assert len(data) % n_votes_per_prompt == 0, "data length must be divisible by n_votes_per_prompt"
-        num_prompts = len(data) // n_votes_per_prompt
-
-        selected_indices = []
-        for i in range(num_prompts):
-            start = i * n_votes_per_prompt
-            selected_indices.extend(range(start, start + n_samples_per_prompt))
-
-        return data[selected_indices]
 
     def fit(self):
         """
         The training loop of PPO.
-        The driver process only need to call the compute functions of the worker group through RPC to construct the PPO dataflow.
-        The light-weight advantage computation is done on the driver process.
+        The driver process only need to call the compute functions of the worker group through RPC to
+        construct the PPO dataflow. The light-weight advantage computation is done on the driver process.
         """
         from omegaconf import OmegaConf
 
@@ -368,6 +358,7 @@ class RayPRIMETrainer(RayPPOTrainer):
         # currently, we only support validation using the reward_function.
         if self.val_reward_fn is not None and self.config.trainer.get("val_before_train", True):
             val_metrics = self._validate()
+            assert val_metrics, f"{val_metrics=}"
             pprint(f"Initial validation metrics: {val_metrics}")
             logger.log(data=val_metrics, step=self.global_steps)
             if self.config.trainer.get("val_only", False):
@@ -377,41 +368,24 @@ class RayPRIMETrainer(RayPPOTrainer):
         self.global_steps += 1
 
         for epoch in range(self.config.trainer.total_epochs):
-            if self.config.data.shuffle:
-                train_dataloader_generator = torch.Generator()
-                train_dataloader_generator.manual_seed(self.config.data.get("seed", epoch))
-                sampler = RandomSampler(data_source=self.train_dataset, generator=train_dataloader_generator)
-            else:
-                sampler = SequentialSampler(data_source=self.train_dataset)
-
-            self.train_dataloader = StatefulDataLoader(
-                dataset=self.train_dataset,
-                batch_size=self.config.data.get("gen_batch_size", self.config.data.train_batch_size),
-                drop_last=True,
-                collate_fn=collate_fn,
-                sampler=sampler,
-            )
             for batch_dict in self.train_dataloader:
                 metrics = {}
                 timing_raw = {}
 
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
-                
-                batch.meta_info["do_vote"] = False
-                if self.use_ttrl:
-                    self.config.actor_rollout_ref.rollout.n = self.n_votes_per_prompt
-                    batch.meta_info["do_vote"] = True
 
                 # pop those keys for generation
-                gen_batch = batch.pop(batch_keys=["input_ids", "attention_mask", "position_ids"], meta_info_keys=["do_vote"])
+                gen_batch = batch.pop(batch_keys=["input_ids", "attention_mask", "position_ids"])
 
-                with _timer("step", timing_raw):
+                with simple_timer("step", timing_raw):
                     # generate a batch
-                    with _timer("gen", timing_raw):
+                    with simple_timer("gen", timing_raw):
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
+                        timing_raw.update(gen_batch_output.meta_info["timing"])
+                        gen_batch_output.meta_info.pop("timing", None)
 
                     if self.config.algorithm.adv_estimator == "remax":
-                        with _timer("gen_max", timing_raw):
+                        with simple_timer("gen_max", timing_raw):
                             gen_baseline_batch = deepcopy(gen_batch)
                             gen_baseline_batch.meta_info["do_sample"] = False
                             gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
@@ -433,59 +407,48 @@ class RayPRIMETrainer(RayPPOTrainer):
                     batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
                     batch = batch.union(gen_batch_output)
 
-                    batch.batch["response_mask"] = compute_response_mask(batch)
-                    # balance the number of valid tokens on each dp rank.
-                    # Note that this breaks the order of data inside the batch.
-                    # Please take care when you implement group based adv computation such as GRPO and rloo
-                    # self._balance_batch(batch, metrics=metrics)
+                    # Balance the number of valid tokens across DP ranks.
+                    # NOTE: This usually changes the order of data in the `batch`,
+                    # which won't affect the advantage calculation (since it's based on uid),
+                    # but might affect the loss calculation (due to the change of mini-batching).
+                    # TODO: Decouple the DP balancing and mini-batching.
+                    if self.config.trainer.balance_batch:
+                        self._balance_batch(batch, metrics=metrics)
 
                     # compute global_valid tokens
-                    # if self.config.trainer.balance_batch:
-                    #     self._balance_batch(batch, metrics=metrics)
-
                     batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
 
                     # verify
-                    with _timer("verify", timing_raw):
-                        result = self.reward_fn(batch, return_dict=True)
+                    with simple_timer("verify", timing_raw):
+                        scores = self.reward_fn.verify(batch)
+                        metrics["acc"] = statistics.mean(scores)
 
-                        if self.use_ttrl:
-                            batch = self._select_top_k_per_prompt(batch, self.n_votes_per_prompt, self.n_samples_per_prompt)
-                            self.config.actor_rollout_ref.rollout.n = self.n_samples_per_prompt
-                        # scores = reward_tensor.sum(-1).cpu().tolist()
-                        # scores = self.reward_fn(batch)
-                        #metrics["acc"] = statistics.mean(scores)
+                    # filter the batch. 1/oversample_factor samples will be kept.
+                    # If there is a filter, prompts passing it will be prioritized.
 
-                    # # filter the batch. 1/oversample_factor samples will be kept. If there is a filter, prompts passing it will be prioritized.
-
-                    # batch = self.filter_and_downsample(scores, batch)
+                    batch = self.filter_and_downsample(scores, batch)
                     batch.meta_info["n"] = self.config.actor_rollout_ref.rollout.n
-                    n_samples = self.n_samples_per_prompt
+                    n_samples = self.config.actor_rollout_ref.rollout.n
 
                     # recompute old_log_probs
-                    with _timer("old_log_prob", timing_raw):
+                    with simple_timer("old_log_prob", timing_raw):
                         old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
                         entropys = old_log_prob.batch["entropys"]
                         response_masks = compute_response_mask(batch)
                         loss_agg_mode = self.config.actor_rollout_ref.actor.loss_agg_mode
-                        entropy_loss = agg_loss(
-                            loss_mat=entropys, loss_mask=response_masks, loss_agg_mode=loss_agg_mode
-                        )
-                        old_log_prob_metrics = {"actor/entropy_loss": entropy_loss.detach().item()}
+                        entropy_agg = agg_loss(loss_mat=entropys, loss_mask=response_masks, loss_agg_mode=loss_agg_mode)
+                        old_log_prob_metrics = {"actor/entropy": entropy_agg.detach().item()}
                         metrics.update(old_log_prob_metrics)
                         old_log_prob.batch.pop("entropys")
                         batch = batch.union(old_log_prob)
 
                     if self.use_reference_policy:
                         # compute reference log_prob
-                        with _timer("ref", timing_raw):
+                        with simple_timer("ref", timing_raw):
                             ref_log_prob = self.ref_policy_wg.compute_ref_log_prob(batch)
                             batch = batch.union(ref_log_prob)
 
-                    with _timer("adv", timing_raw):
-                        # if self.use_ttrl:
-                        #     sorted_indices = sorted(range(len(batch)), key=lambda i: batch[i].non_tensor_batch["extra_info"]["index"])
-                        #     batch = batch[sorted_indices]
+                    with simple_timer("adv", timing_raw):
                         if self.use_rm:
                             update_style = self.config.reward_model.model.get("update", "none")
                             if update_style == "none":  # only run forward
@@ -534,7 +497,7 @@ class RayPRIMETrainer(RayPPOTrainer):
                         )
 
                     # update actor
-                    with _timer("update_actor", timing_raw):
+                    with simple_timer("update_actor", timing_raw):
                         actor_output = self.actor_rollout_wg.update_actor(batch)
                     actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
                     metrics.update(actor_output_metrics)
@@ -545,12 +508,12 @@ class RayPRIMETrainer(RayPPOTrainer):
                         and self.config.trainer.test_freq > 0
                         and self.global_steps % self.config.trainer.test_freq == 0
                     ):
-                        with _timer("testing", timing_raw):
+                        with simple_timer("testing", timing_raw):
                             val_metrics: dict = self._validate()
                         metrics.update(val_metrics)
 
                     if self.config.trainer.save_freq > 0 and self.global_steps % self.config.trainer.save_freq == 0:
-                        with _timer("save_checkpoint", timing_raw):
+                        with simple_timer("save_checkpoint", timing_raw):
                             self._save_checkpoint()
 
                 # collect metrics
@@ -572,7 +535,7 @@ class RayPRIMETrainer(RayPPOTrainer):
                         self.config.trainer.save_freq > 0
                         and (self.global_steps - 1) % self.config.trainer.save_freq != 0
                     ):
-                        with _timer("save_checkpoint", timing_raw):
+                        with simple_timer("save_checkpoint", timing_raw):
                             self._save_checkpoint()
                     return
 

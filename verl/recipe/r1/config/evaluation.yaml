@@ -4,11 +4,10 @@ data:
   response_key: responses
   data_source_key: data_source
   reward_model_key: reward_model
-  extrainfo_key: extra_info
-  indexes_key: index
 
 custom_reward_function:
-  do_majority_vote: False
-  majority_n: 1
   path: null
   name: compute_score
+
+ray_init:
+  num_cpus: null # `None` means using all CPUs, which might cause hang if limited in systems like SLURM. Please set to a number allowed then.

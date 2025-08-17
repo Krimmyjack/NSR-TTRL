@@ -24,6 +24,7 @@
 > Welcome to the Era of Experience.  --David Silver, Richard S. Sutton
 
 # 🎉News
+- **[2025-08-17]** We bump into [verl v0.4.1](https://github.com/volcengine/verl/releases/tag/v0.4.1), and now you can enable TTRL by simply setting `+ttrl.enable=True`!
 
 - **[2025-05-23]** We update both the paper and the code, with the implementation based on the [verl](https://github.com/volcengine/verl).
 
@@ -59,15 +60,24 @@ Furthermore, although TTRL is only supervised by the `maj@n` metric, TTRL has de
 
 # ✨Getting Started
 
-You can reproduce the results on `AIME 2024` with the following commands:
+## Env Setup
 
 ```bash
 git clone https://github.com/PRIME-RL/TTRL.git
-cd verl
 
-pip install -r requirements.txt
+cd TTRL/verl
 
-bash examples/ttrl/Qwen-2.5-Math/aime.sh
+conda create -n ttrl python==3.10
+conda activate ttrl
+bash scripts/install_ttrl_deps.sh
+pip install -e .
+```
+
+## Reproduce TTRL
+You can reproduce the results on `AIME 2024` with the following commands:
+
+```bash
+bash examples/ttrl/Qwen2.5/aime.sh
 ```
 
 > [!NOTE]
@@ -75,7 +85,7 @@ bash examples/ttrl/Qwen-2.5-Math/aime.sh
 > - We provide scripts in the [verl/examples/ttrl](https://github.com/PRIME-RL/TTRL/tree/main/verl/examples/ttrl) directory for running TTRL on multiple models across various benchmarks.
 > - For further details regarding the code, please refer to the [verl documentation](https://verl.readthedocs.io/en/latest/index.html).
 
-We additionally conducted three independent runs using the preview version of our code. Two of the runs achieved a pass@1 of 43.3, while one run reached 46.7. Please refer to the [Weights & Biases logs](https://wandb.ai/truman-yx-zuo-nlp/TTRL/workspace).
+We additionally conducted three independent runs using the preview version of our code. Two of the runs achieved a pass@1 (greedy) of 43.3, while one run reached 46.7. Please refer to the [Weights & Biases logs](https://wandb.ai/truman-yx-zuo-nlp/TTRL/workspace).
 
 *All experiments were conducted on 8 x NVIDIA A100 80GB GPUs.*
 
@@ -103,7 +113,7 @@ If you find TTRL helpful, please cite us.
 ```bibtex
 @article{zuo2025ttrl,
   title={Ttrl: Test-time reinforcement learning},
-  author={Zuo, Yuxin and Zhang, Kaiyan and Qu, Shang and Sheng, Li and Zhu, Xuekai and Qi, Biqing and Sun, Youbang and Cui, Ganqu and Ding, Ning and Zhou, Bowen},
+  author={Zuo, Yuxin and Zhang, Kaiyan and Sheng, Li and Qu, Shang and Cui, Ganqu and Zhu, Xuekai and Li, Haozhan and Zhang, Yuchen and Long, Xinwei and Hua, Ermo and others},
   journal={arXiv preprint arXiv:2504.16084},
   year={2025}
 }
