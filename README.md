@@ -24,12 +24,10 @@
 > Welcome to the Era of Experience.  --David Silver, Richard S. Sutton
 
 # 🎉News
+- **[2025-09-18]** TTRL paper is accepted to [NeurIPS 2025](https://neurips.cc/Conferences/2025)!
 - **[2025-08-17]** We bump into [verl v0.4.1](https://github.com/volcengine/verl/releases/tag/v0.4.1), and now you can enable TTRL by simply setting `+ttrl.enable=True`!
-
 - **[2025-05-23]** We update both the paper and the code, with the implementation based on the [verl](https://github.com/volcengine/verl).
-
 - **[2025-04-24]** We release the code and experimental logs. Check it out: [Getting Started](#getting-started).
-
 - **[2025-04-23]** We present **TTRL** (Test-Time Reinforcement Learning), an open-source solution for online RL on data without ground-truth labels, especially test data.
 
 # 📖Introduction
