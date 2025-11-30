@@ -17,9 +17,10 @@ import torch
 import numpy as np
 from verl.utils.reward_score.ttrl_math import extract_answer, simplify_expression_string, grade
 
+# === Data Selection ===
 def select_top_k_per_prompt(data, n_votes_per_prompt, n_samples_per_prompt):
     """
-    Select the first k rollouts per prompt, used for TTRL downsampling.
+    Select the first k rollouts per prompt, used for TTRL downsampling for update.
     """
     assert len(data) % n_votes_per_prompt == 0, "data length must be divisible by n_votes_per_prompt"
     num_prompts = len(data) // n_votes_per_prompt
@@ -28,7 +29,7 @@ def select_top_k_per_prompt(data, n_votes_per_prompt, n_samples_per_prompt):
     for i in range(num_prompts):
         start = i * n_votes_per_prompt
         selected_indices.extend(range(start, start + n_samples_per_prompt))
-
+    # return the selected data
     return data[selected_indices]
 
 
@@ -42,11 +43,16 @@ def apply_original_gt(batch):
     for i in range(len(batch)):
         data_item = batch[i]
         original_gt = data_item.non_tensor_batch["reward_model"]["original_gt"]
+        # apply the pseudo label to the ground truth
         data_item.non_tensor_batch["reward_model"]["ground_truth"] = original_gt
 
     return batch
 
 
+"""
+batch: dataproto, gen_batch_output: List[dataproto], n: int, tokenizer: PreTrainedTokenizer
+
+"""
 def apply_ttrl_gt(batch, gen_batch_output, n, tokenizer):
     """
     Apply the majority vote ground truth to the batch.
@@ -58,22 +64,29 @@ def apply_ttrl_gt(batch, gen_batch_output, n, tokenizer):
     model_outputs = []  
     for i in range(num_prompts):
         start = i * n
+        # decode each of the n outputs for the prompt
         for j in range(n):
             data_item = gen_batch_output[start + j]
+            # dataproto.batch contains the generated ids and attention mask
             prompt_ids = data_item.batch["prompts"]
+            # one dimentions and the last shape is the length
             prompt_length = prompt_ids.shape[-1]
             response_ids = data_item.batch["responses"]
+            # extract the valid response ids by attention mask (excluding padding(0) and prompt(start_point))
             valid_response_length = data_item.batch["attention_mask"][prompt_length:].sum()
+            # only keeps the valid response ids
             valid_response_ids = response_ids[:valid_response_length]
+            # decode the response ids to string
             response_str = tokenizer.decode(valid_response_ids, skip_special_tokens=True)
             model_outputs.append(response_str)
-
+    # calculate the majority vote ground truth and majority ratio and return the batch
     majority_gt_list, majority_ratio_list = _batch_majority_vote(model_outputs, n)
     
     assert len(batch) == len(majority_gt_list), "batch length must be equal to the number of model outputs"
-    
+    # apply the majority vote ground truth to the batch meta info:
     for i in range(num_prompts):
         data_item = batch[i]
+        # put the presudo label to the ground truth.
         original_gt = data_item.non_tensor_batch["reward_model"]["ground_truth"]
         data_item.non_tensor_batch["reward_model"]["ground_truth"] = majority_gt_list[i]
         data_item.non_tensor_batch["reward_model"]["majority_gt"] = majority_gt_list[i]
@@ -93,6 +106,7 @@ def _batch_majority_vote(model_outputs: List[str], n: int) -> tuple[List[str], L
         majority_gt_list: list of str
         majority_ratio_list: list of float
     """
+    # len = model_outputs
     majority_gt_list = []
     majority_ratio_list = []
     assert len(model_outputs) % n == 0
@@ -105,17 +119,21 @@ def _batch_majority_vote(model_outputs: List[str], n: int) -> tuple[List[str], L
         
     return majority_gt_list, majority_ratio_list
 
-
+# select the majority vote answer from model outputs and return the ratio and final answer for labeling.
+# return type can define as tuple[str, float]
 def _majority_vote(model_outputs: List[str]) -> tuple[str, float]:
     assert len(model_outputs) > 0
+    # extract answer from gen_context
     model_answers = [extract_answer(generated_text) for generated_text in model_outputs]
+    # exclude None answers
     model_answers = [answer for answer in model_answers if answer is not None]
+    # simplify the expression strings to unify the answers (one key metrics in RLVR is the expression simplification and how to match the different forms of the same answer)
     model_answers = [simplify_expression_string(answer) for answer in model_answers]
     if len(model_answers) == 0:
         return "None", 0.0
-    
+    # use the counter to find the majority vote answer
     counter = Counter(model_answers)
-    
+    # counter.most_common returns a list of tuples (answer, count)
     majority_answer, majority_count = counter.most_common(1)[0]
     majority_ratio = majority_count / len(model_outputs)
     

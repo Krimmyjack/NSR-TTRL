@@ -78,7 +78,9 @@ def compute_score(model_response, gt_answer, fast=False):
         # return 0.0, 0.0  # Cannot even parse anything.
     is_correct = False
     if isinstance(gt_answer, float) or isinstance(gt_answer, int):
+    # extract the numeric answer from model answer
         gt_answer = str(gt_answer)
+    # grade 
     if isinstance(gt_answer, str):
         is_correct = grade(model_answer, gt_answer, fast)
     elif isinstance(gt_answer, list):

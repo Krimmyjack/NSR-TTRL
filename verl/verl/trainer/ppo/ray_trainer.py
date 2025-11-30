@@ -264,6 +264,18 @@ def compute_advantage(
         )
         data.batch["advantages"] = advantages
         data.batch["returns"] = returns
+    elif adv_estimator == AdvantageEstimator.GRPO_NSR:
+        nsr_mask = data.batch["response_mask"]
+        advantages, returns = core_algos.compute_grpo_nsr_outcome_advantage(
+            token_level_rewards=data.batch["token_level_rewards"],
+            response_mask=nsr_mask,
+            index=data.non_tensor_batch["uid"],
+            norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
+            token_level_scores=data.batch.get("token_level_scores", None),
+            config=config,
+        )
+        data.batch["advantages"] = advantages
+        data.batch["returns"] = returns
     else:
         # handle all other adv estimator type other than GAE and GRPO
         adv_estimator_fn = core_algos.get_adv_estimator_fn(adv_estimator)
@@ -356,6 +368,7 @@ class RayPPOTrainer:
             self.use_critic = True
         elif self.config.algorithm.adv_estimator in [
             AdvantageEstimator.GRPO,
+            AdvantageEstimator.GRPO_NSR,
             AdvantageEstimator.GRPO_PASSK,
             AdvantageEstimator.REINFORCE_PLUS_PLUS,
             AdvantageEstimator.REMAX,
@@ -531,8 +544,8 @@ class RayPPOTrainer:
                 "tool_config_path or interaction_config_path must be set when enabling multi_turn with tool, "
                 "due to no role-playing support"
             )
-            assert config.algorithm.adv_estimator in [AdvantageEstimator.GRPO], (
-                "only GRPO is tested for multi-turn with tool"
+            assert config.algorithm.adv_estimator in [AdvantageEstimator.GRPO, AdvantageEstimator.GRPO_NSR], (
+                "only GRPO-based estimators are tested for multi-turn with tool"
             )
 
         print("[validate_config] All configuration checks passed successfully!")
@@ -785,7 +798,7 @@ class RayPPOTrainer:
                 for metric_name, metric_val in metric2val.items():
                     if (
                         (var_name == core_var)
-                        and any(metric_name.startswith(pfx) for pfx in ["mean", "maj", "best"])
+                        and any(metric_name.startswith(pfx) for pfx in ["mean", "maj", "best","pass"])
                         and (f"@{n_max}" in metric_name)
                     ):
                         metric_sec = "val-core"
@@ -1136,12 +1149,12 @@ class RayPPOTrainer:
                     with marked_timer("gen", timing_raw, color="red"):
                         if self.config.get("ttrl", {}).get("enable", False):
                             from verl.trainer.ppo.ttrl_utils import select_top_k_per_prompt, apply_ttrl_gt
-
+                            # pass additional info to the batch class
                             gen_batch.meta_info["kwargs"] = {"n": self.config.ttrl.n_votes_per_prompt}
                             gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
-
+                            # 经典断言，卡在这好久了。
                             assert len(gen_batch_output) == len(batch) * self.config.ttrl.n_votes_per_prompt
-
+                            # return the batch with presudo labels and majority vote ground truth
                             batch = apply_ttrl_gt(batch, gen_batch_output, self.config.ttrl.n_votes_per_prompt, self.tokenizer)
                             gen_batch_output = select_top_k_per_prompt(gen_batch_output, self.config.ttrl.n_votes_per_prompt, self.config.ttrl.n_samples_per_prompt)
 
@@ -1291,6 +1304,31 @@ class RayPPOTrainer:
                             multi_turn=self.config.actor_rollout_ref.rollout.multi_turn.enable,
                             config=self.config.algorithm,
                         )
+
+                        if self.config.algorithm.adv_estimator == AdvantageEstimator.GRPO_NSR:
+                            nsr_cfg = OmegaConf.select(self.config, "algorithm.grpo_nsr") or OmegaConf.select(
+                                self.config, "algorithm.grpo_dual_adv"
+                            )
+                            nsr_cfg = nsr_cfg or {}
+                            pos_weight = nsr_cfg.get("positive_weight", 0.1)
+                            neg_weight = nsr_cfg.get("negative_weight", 1.0)
+                            threshold = nsr_cfg.get("correctness_threshold", 0.5)
+
+                            seq_scores = batch.batch["token_level_scores"].sum(dim=-1)
+                            correct_idx = seq_scores >= threshold
+                            response_mask = batch.batch["response_mask"].bool()
+                            seq_token_mask = correct_idx.view(-1, 1).expand_as(response_mask)
+                            total_tokens = response_mask.sum().item()
+                            pos_token_ratio = (
+                                (seq_token_mask & response_mask).sum().item() / total_tokens if total_tokens > 0 else 0.0
+                            )
+
+                            metrics["training/grpo_nsr_pos_weight"] = pos_weight
+                            metrics["training/grpo_nsr_neg_weight"] = neg_weight
+                            metrics["training/grpo_nsr_pos_ratio"] = (
+                                correct_idx.float().mean().item() if correct_idx.numel() > 0 else 0.0
+                            )
+                            metrics["training/grpo_nsr_pos_token_ratio"] = pos_token_ratio
 
                     # update critic
                     if self.use_critic:

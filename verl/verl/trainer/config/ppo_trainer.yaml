@@ -864,7 +864,10 @@ algorithm:
 
   # Discount factor for future rewards
   gamma: 1.0
-
+  
+  positive_weight: 0.1
+  
+  negative_weight: 1.0
   # Trade-off between bias and variance in the GAE estimator
   lam: 1.0
 
@@ -887,7 +890,7 @@ algorithm:
     type: fixed
 
     # Initial coefficient for KL penalty
-    kl_coef: 0.001
+    kl_coef: 0.0
 
     # Horizon value for adaptive controller (if enabled)
     horizon: 10000
@@ -1002,7 +1005,7 @@ trainer:
   resume_from_path: null
 
   # Whether to run validation before training begins
-  val_before_train: True
+  val_before_train: False
 
   # Whether to run validation only
   val_only: False

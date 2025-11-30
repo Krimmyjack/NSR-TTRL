@@ -15,6 +15,7 @@
 Metrics related to the PPO trainer.
 """
 
+import math
 from collections import defaultdict
 from functools import partial
 from typing import Any, Callable, Dict, List
@@ -335,6 +336,34 @@ def calc_maj_val(data: list[dict[str, Any]], vote_key: str, val_key: str) -> flo
     return maj_val
 
 
+def _is_binary_metric_values(values: list[Any], atol: float = 1e-6) -> bool:
+    """Return True if values only contain 0/1 (within tolerance)."""
+    if not values:
+        return False
+    arr = np.asarray(values, dtype=float)
+    uniques = np.unique(arr)
+    zero_mask = np.isclose(uniques, 0.0, atol=atol)
+    one_mask = np.isclose(uniques, 1.0, atol=atol)
+    return np.all(zero_mask | one_mask)
+
+
+def calc_pass_at_k(successes: list[Any], k: int) -> float:
+    """Compute pass@k for binary successes sampled without replacement."""
+    total = len(successes)
+    if total == 0:
+        return 0.0
+    k = max(1, min(k, total))
+    success_cnt = int(np.sum(np.asarray(successes, dtype=float) > 0.5))
+    if success_cnt == 0:
+        return 0.0
+    failures = total - success_cnt
+    if failures == 0 or failures < k:
+        return 1.0
+    total_comb = math.comb(total, k)
+    fail_comb = math.comb(failures, k)
+    return 1.0 - fail_comb / total_comb
+
+
 def process_validation_metrics(
     data_sources: list[str], sample_inputs: list[str], infos_dict: dict[str, list[Any]], seed: int = 42
 ) -> dict[str, dict[str, dict[str, float]]]:
@@ -371,6 +400,7 @@ def process_validation_metrics(
         - "worst@N/std": Standard deviation of the worst values in bootstrap samples
         - "maj@N/mean": Mean of majority voting results in bootstrap samples (if "pred" exists)
         - "maj@N/std": Standard deviation of majority voting results (if "pred" exists)
+        - "pass@K": Probability of at least one success when sampling K responses (for binary metrics)
 
     Example:
         >>> data_sources = ["source1", "source1", "source2"]
@@ -402,28 +432,35 @@ def process_validation_metrics(
                 if n_resps > 1:
                     metric[f"std@{n_resps}"] = np.std(var_vals)
 
-                    ns = []
+                    subset_sizes = []
                     n = 2
                     while n < n_resps:
-                        ns.append(n)
+                        subset_sizes.append(n)
                         n *= 2
-                    ns.append(n_resps)
+                    subset_sizes.append(n_resps)
 
-                    for n in ns:
+                    for subset_size in subset_sizes:
                         [(bon_mean, bon_std), (won_mean, won_std)] = bootstrap_metric(
-                            data=var_vals, subset_size=n, reduce_fns=[np.max, np.min], seed=seed
+                            data=var_vals, subset_size=subset_size, reduce_fns=[np.max, np.min], seed=seed
                         )
-                        metric[f"best@{n}/mean"], metric[f"best@{n}/std"] = bon_mean, bon_std
-                        metric[f"worst@{n}/mean"], metric[f"worst@{n}/std"] = won_mean, won_std
+                        metric[f"best@{subset_size}/mean"], metric[f"best@{subset_size}/std"] = bon_mean, bon_std
+                        metric[f"worst@{subset_size}/mean"], metric[f"worst@{subset_size}/std"] = won_mean, won_std
                         if var2vals.get("pred", None) is not None:
                             vote_data = [{"val": val, "pred": pred} for val, pred in zip(var_vals, var2vals["pred"])]
                             [(maj_n_mean, maj_n_std)] = bootstrap_metric(
                                 data=vote_data,
-                                subset_size=n,
+                                subset_size=subset_size,
                                 reduce_fns=[partial(calc_maj_val, vote_key="pred", val_key="val")],
                                 seed=seed,
                             )
-                            metric[f"maj@{n}/mean"], metric[f"maj@{n}/std"] = maj_n_mean, maj_n_std
+                            metric[f"maj@{subset_size}/mean"], metric[f"maj@{subset_size}/std"] = maj_n_mean, maj_n_std
+                else:
+                    subset_sizes = []
+
+                if _is_binary_metric_values(var_vals):
+                    pass_sizes = sorted({1, *subset_sizes} if subset_sizes else {1})
+                    for pass_k in pass_sizes:
+                        metric[f"pass@{pass_k}"] = calc_pass_at_k(var_vals, pass_k)
 
                 data_src2prompt2var2metric[data_source][prompt][var_name] = metric
 

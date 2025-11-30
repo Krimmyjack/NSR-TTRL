@@ -108,6 +108,7 @@ class AdvantageEstimator(str, Enum):
 
     GAE = "gae"
     GRPO = "grpo"
+    GRPO_NSR = "grpo_nsr"
     REINFORCE_PLUS_PLUS = "reinforce_plus_plus"
     REINFORCE_PLUS_PLUS_BASELINE = "reinforce_plus_plus_baseline"
     REMAX = "remax"
@@ -198,8 +199,71 @@ def compute_gae_advantage_return(
         returns = advantages + values
         advantages = verl_F.masked_whiten(advantages, response_mask)
     return advantages, returns
+# NOTE: this customized estimator mirrors the NSR-style weighting for GRPO advantages.
+@register_adv_est(AdvantageEstimator.GRPO_NSR)
+def compute_grpo_nsr_outcome_advantage(
+    token_level_rewards: torch.Tensor,
+    response_mask: torch.Tensor,
+    index: np.ndarray,
+    epsilon: float = 1e-6,
+    norm_adv_by_std_in_grpo: bool = True,
+    token_level_scores: torch.Tensor | None = None,
+    config=None,
+    **kwargs,
+):
+    """Compute GRPO advantages and reweight correct/incorrect samples with NSR-style coefficients."""
 
+    scores = token_level_rewards.sum(dim=-1)
 
+    id2score = defaultdict(list)
+    id2mean = {}
+    id2std = {}
+
+    with torch.no_grad():
+        bsz = scores.shape[0]
+        for i in range(bsz):
+            id2score[index[i]].append(scores[i])
+        for idx in id2score:
+            if len(id2score[idx]) == 1:
+                id2mean[idx] = scores.new_zeros(())
+                id2std[idx] = scores.new_ones(())
+            elif len(id2score[idx]) > 1:
+                stacked_scores = torch.stack(id2score[idx])
+                id2mean[idx] = torch.mean(stacked_scores)
+                id2std[idx] = torch.std(stacked_scores)
+            else:
+                raise ValueError(f"no score in prompt index: {idx}")
+        for i in range(bsz):
+            if norm_adv_by_std_in_grpo:
+                scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)
+            else:
+                scores[i] = scores[i] - id2mean[index[i]]
+
+        cfg = None
+        if config is not None:
+            cfg = config.get("grpo_nsr", None)
+            if cfg is None:
+                cfg = config.get("grpo_dual_adv", None)
+        if cfg is None:
+            cfg = {}
+        pos_weight = float(cfg.get("positive_weight", 0.1))
+        neg_weight = float(cfg.get("negative_weight", 1.0))
+        threshold = float(cfg.get("correctness_threshold", 0.5))
+
+        correctness_tensor = token_level_scores if token_level_scores is not None else token_level_rewards
+        seq_correctness = correctness_tensor.sum(dim=-1)
+        correct_mask = seq_correctness >= threshold
+
+        if pos_weight != 1.0 or neg_weight != 1.0:
+            weights = torch.where(
+                correct_mask,
+                scores.new_full((), pos_weight),
+                scores.new_full((), neg_weight),
+            )
+            scores = scores * weights
+
+    advantages = scores.unsqueeze(-1) * response_mask
+    return advantages, advantages
 # NOTE(sgm): this implementation only consider outcome supervision, where the reward is a scalar.
 @register_adv_est(AdvantageEstimator.GRPO)  # or simply: @register_adv_est("grpo")
 def compute_grpo_outcome_advantage(

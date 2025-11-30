@@ -2,7 +2,10 @@
 #export VLLM_ATTENTION_BACKEND=XFORMERS
 unset VLLM_ATTENTION_BACKEND
 export VLLM_USE_V1=1
-
+# export RAY_USE_MULTIPROCESSING_CPU_COUNT=1
+# export RAY_DISABLE_DOCKER_CPU_WARNING=1
+# export RAY_cpu_count=4
+# export OMP_NUM_THREADS=1 
 # ------------------------------------------------------------
 
 DATE=$(date +%m%d)
@@ -10,7 +13,7 @@ TIME_TAG=$(date +%H%M%S)
 
 TASK="MATH-TTT"
 BACKBONE="Qwen2.5-Math-1.5B"
-ADVANTAGE="grpo"
+ADVANTAGE="grpo_nsr"
 
 K=3
 MAX_PROMPT_LENGTH=1024
@@ -21,27 +24,27 @@ else
   N=16
 fi
 
-EPISODE=10
+EPISODE=1000
 DATA_TRAIN_BATCH_SIZE=32
 N_VOTES_PER_PROMPT=64
 N_SAMPLES_PER_PROMPT=32
 MINI_BATCH_SIZE=1
 MICRO_BATCH_SIZE=2
 
-DATA_LOCAL_DIR="path/to/TTRL/verl/data"
-BACKBONE_PATH="path/to/${BACKBONE}"
+DATA_LOCAL_DIR="/root/autodl-tmp/TTRL/verl/data"
+BACKBONE_PATH="/root/autodl-tmp/model/${BACKBONE}"
 
 MODEL="${TASK}-${BACKBONE}"
 EXPERIMENT="TTRL-Len@${K}k"
 
-WANDB_PROJECT="TTRL-verl"
-LOG_NAME="${DATE}-${EXPERIMENT}-${MODEL}-${ADVANTAGE}"
+WANDB_PROJECT="one-shot-TTRL-verl"
+LOG_NAME="32-shot-consistency-pass@32-${DATE}-${EXPERIMENT}-${MODEL}-${ADVANTAGE}"
 OUTPUT_DIR="checkpoints/${WANDB_PROJECT}/${MODEL}/${DATE}/${EXPERIMENT}-${ADVANTAGE}-${TIME_TAG}"
 
 # ------------------------------------------------------------
 python -m verl.trainer.main_ppo \
 --config-name='ppo_trainer_ttrl.yaml'\
-  data.train_files=["$DATA_LOCAL_DIR/$TASK/train.parquet"] \
+  data.train_files=["$DATA_LOCAL_DIR/$TASK/answer.jsonl_0.4_pi1-32_r1.parquet"] \
   data.val_files=["$DATA_LOCAL_DIR/$TASK/test.parquet"] \
   data.max_prompt_length=$MAX_PROMPT_LENGTH \
   data.max_response_length=$MAX_RESPONSE_LENGTH \
@@ -68,9 +71,10 @@ python -m verl.trainer.main_ppo \
   actor_rollout_ref.rollout.free_cache_engine=False \
   actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=$MICRO_BATCH_SIZE \
   actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
-  actor_rollout_ref.rollout.gpu_memory_utilization=0.8 \
+  actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
   actor_rollout_ref.rollout.val_kwargs.do_sample=True \
   actor_rollout_ref.rollout.val_kwargs.n=$N \
+  actor_rollout_ref.rollout.n=$N_SAMPLES_PER_PROMPT \
   actor_rollout_ref.rollout.val_kwargs.top_p=0.95 \
   actor_rollout_ref.rollout.val_kwargs.temperature=0.6 \
   actor_rollout_ref.rollout.max_model_len=$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH)) \
@@ -82,7 +86,7 @@ python -m verl.trainer.main_ppo \
   critic.ppo_micro_batch_size_per_gpu=$MICRO_BATCH_SIZE \
   critic.model.fsdp_config.param_offload=False \
   critic.model.fsdp_config.optimizer_offload=False \
-  algorithm.kl_ctrl.kl_coef=0.00 \
+  algorithm.kl_ctrl.kl_coef=0.0 \
   algorithm.adv_estimator=$ADVANTAGE \
   custom_reward_function.path="./verl/utils/reward_score/ttrl_math/__init__.py" \
   custom_reward_function.name=reward_func \
@@ -94,11 +98,11 @@ python -m verl.trainer.main_ppo \
   trainer.experiment_name=$LOG_NAME \
   trainer.n_gpus_per_node=8 \
   trainer.nnodes=1 \
-  trainer.save_freq=2000000 \
-  trainer.test_freq=2 \
+  trainer.save_freq=40 \
+  trainer.test_freq=5 \
   trainer.max_actor_ckpt_to_keep=0 \
   trainer.max_critic_ckpt_to_keep=0 \
   trainer.default_local_dir=$OUTPUT_DIR \
   trainer.total_epochs=$EPISODE "$@"
-
+  # actor_rollout_ref.rollout.val_kwargs.n=$N \
 echo "Output directory: $OUTPUT_DIR"
